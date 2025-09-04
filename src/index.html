@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval';">
+    <title>StalkerRP Launcher (Electron)</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>StalkerRP Launcher — Forge 1.20.1</h1>
+
+      <div class="row">
+        <label for="username">Pseudo (mode crack):</label>
+        <input id="username" placeholder="Pseudo (3-16, lettres/chiffres/_)" pattern="[A-Za-z0-9_]{3,16}" minlength="3" maxlength="16" title="3-16 caractères, lettres, chiffres et underscore seulement" autocomplete="off" />
+        <div id="usernameError" class="input-error" aria-live="polite" style="color:#e06c75;margin-top:4px;font-size:0.9em;display:none"></div>
+      </div>
+      <div class="row">
+        <button id="launch">Lancer le jeu (télécharger puis exécuter)</button>
+      </div>
+
+      <div class="row expert-panel">
+        <label for="expertToggle"><input type="checkbox" id="expertToggle" /> Mode Expert</label>
+      </div>
+      <div id="expertOptions" class="row" style="display:none;">
+        <label for="extraJvm">Options JVM avancées (une option par espace):</label>
+        <textarea id="extraJvm" placeholder="--add-opens java.base/java.lang=ALL-UNNAMED --add-modules ALL-MODULE-PATH" rows="3" style="width:100%"></textarea>
+        <div style="margin-top:8px">
+          <button id="copyArgs">Copier args</button>
+          <span style="margin-left:12px">PID: <span id="launchPid">-</span></span>
+          <button id="killBtn" style="margin-left:12px">Kill</button>
+        </div>
+      </div>
+
+      <div class="progress-area">
+        <div class="progress-block">
+          <div class="progress-label">Global progress: <span id="globalPercent">...%</span></div>
+          <div class="progress">
+            <div id="globalBar" class="progress-bar"></div>
+          </div>
+        </div>
+        <div class="progress-block hidden">
+          <div class="progress-label">File progress: <span id="filePercent">...%</span> <span id="fileName"></span></div>
+          <div class="progress">
+            <div id="fileBar" class="progress-bar file"></div>
+          </div>
+        </div>
+
+        
+      </div>
+
+      <pre id="log"></pre>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

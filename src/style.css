@@ -1,0 +1,14 @@
+body { font-family: Arial, sans-serif; background:#f5f5f5; }
+.container { max-width:900px; margin:18px auto; background:white; padding:16px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.08) }
+.row { display:flex; gap:8px; align-items:center; margin:8px 0 }
+.row label { width:150px }
+.row input { flex:1; padding:6px }
+button { padding:6px 10px }
+#log { height:220px; overflow:auto; background:#111; color:#9f9; padding:8px }
+.hidden{display:none;}
+.progress-area { margin-top:12px }
+.progress { background:#e6e6e6; border-radius:6px; height:18px; overflow:hidden }
+.progress-bar { height:100%; width:0%; background:linear-gradient(90deg,#4caf50,#8bc34a); transition:width 0.2s }
+.progress-bar.file { background:linear-gradient(90deg,#2196f3,#64b5f6) }
+.progress-label { font-size:13px; margin-bottom:6px }
+.progress-block { margin-bottom:10px }
