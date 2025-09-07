@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchRemoteInfo: (url) => ipcRenderer.invoke('remote:fetch', url),
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSet: (s) => ipcRenderer.invoke('settings:set', s),
+  getSystemMemory: () => ipcRenderer.invoke('system:getMemory'),
   ensureJava22: (preferredPath, jarURL) => ipcRenderer.invoke('java:ensure22', preferredPath, jarURL),
   onSyncMeta: (cb) => {
     ipcRenderer.on('sync:meta', (event, data) => cb(data))

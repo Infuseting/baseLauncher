@@ -29,6 +29,66 @@ async function saveSettings() {
 
 loadSettings().then(() => appendLog('Settings loaded'))
 
+// After settings load, initialize RAM input when possible
+async function initRamInput() {
+  try {
+    const ramEl = document.getElementById('ram')
+    const ramNote = document.getElementById('ramNote')
+    if (!ramEl) return
+    // ask main for system memory
+    const mem = await window.electronAPI.getSystemMemory()
+    const totalMB = (mem && mem.success) ? (mem.totalMB || 4096) : 4096
+    const maxAllowed = Math.max(1024, Math.floor(totalMB * 0.9)) // leave headroom
+    ramEl.max = String(maxAllowed)
+    if (ramNote) ramNote.textContent = `Max détecté: ${totalMB} MB (sélection recommandée ≤ ${maxAllowed} MB)`
+    // fill with saved setting
+    settings = settings || await loadSettings()
+    const saved = settings.ram || 4096
+    // clamp saved value
+    const clamped = Math.min(Math.max(parseInt(saved || 4096, 10) || 4096, 512), maxAllowed)
+    ramEl.value = String(clamped)
+
+    // persist on change
+    ramEl.addEventListener('change', async () => {
+      const v = parseInt(ramEl.value || '0', 10) || 4096
+      settings = settings || await loadSettings()
+      settings.ram = Math.min(Math.max(v, 512), maxAllowed)
+      await saveSettings()
+      appendLog('RAM sauvegardée: ' + String(settings.ram) + ' MB')
+  // sync slider value
+  const slider = document.getElementById('ramSlider')
+  if (slider) slider.value = String(settings.ram)
+    })
+  } catch (e) { appendLog('Erreur init RAM UI: ' + (e && e.message ? e.message : String(e))) }
+}
+
+// initialize RAM input after initial settings load
+initRamInput()
+
+// sync slider and presets
+const ramSlider = document.getElementById('ramSlider')
+if (ramSlider) {
+  ramSlider.addEventListener('input', () => {
+    const v = parseInt(ramSlider.value || '0', 10) || 4096
+    const ramEl = document.getElementById('ram')
+    if (ramEl) ramEl.value = String(v)
+  })
+}
+const presetBtns = Array.from(document.querySelectorAll('.ramPreset'))
+for (const btn of presetBtns) {
+  btn.addEventListener('click', async (e) => {
+    const v = parseInt(btn.getAttribute('data-val') || '4096', 10)
+    const ramEl = document.getElementById('ram')
+    const slider = document.getElementById('ramSlider')
+    if (ramEl) ramEl.value = String(v)
+    if (slider) slider.value = String(v)
+    settings = settings || await loadSettings()
+    settings.ram = v
+    await saveSettings()
+    appendLog('RAM preset sélectionné: ' + String(v) + ' MB')
+  })
+}
+
 // Ensure Java 22 if no javaPath known
 async function ensureJavaIfNeeded() {
   if (settings && settings.javaPath) return
@@ -195,27 +255,10 @@ async function loadRemoteInfoAuto() {
 // Auto load on startup
 loadRemoteInfoAuto()
 
+// Autofill username input from settings when available
+
+
 // Username live validation
-const usernameEl = document.getElementById('username')
-const usernameErrorEl = document.getElementById('usernameError')
-const launchBtn = document.getElementById('launch')
-function validateUsernameUI() {
-  const val = usernameEl ? usernameEl.value.trim() : ''
-  const ok = /^[A-Za-z0-9_]{3,16}$/.test(val)
-  if (!ok) {
-    if (usernameErrorEl) {
-      usernameErrorEl.style.display = 'block'
-      usernameErrorEl.textContent = 'Pseudo invalide — 3-16 caractères. Lettres, chiffres et underscore seulement.'
-    }
-    if (launchBtn) launchBtn.disabled = true
-  } else {
-    if (usernameErrorEl) { usernameErrorEl.style.display = 'none'; usernameErrorEl.textContent = '' }
-    if (launchBtn) launchBtn.disabled = false
-  }
-}
-if (usernameEl) usernameEl.addEventListener('input', validateUsernameUI)
-// run once to initialize
-validateUsernameUI()
 
 // Launch handler
 
@@ -235,12 +278,7 @@ document.getElementById('launch').addEventListener('click', async () => {
 
     if (!mcPath) { appendLog('Aucun dossier Minecraft configuré (settings.minecraftPath)'); return }
 
-  // read username from UI and persist
-  const usernameEl = document.getElementById('username')
-  const username = usernameEl ? usernameEl.value.trim() : (settings.username || '')
-  if (!username) { appendLog('Nom d\'utilisateur requis'); if (usernameEl) usernameEl.focus(); return }
-  if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) { appendLog('Nom invalide — 3-16 caractères, lettres, chiffres et underscore seulement'); if (usernameEl) usernameEl.focus(); return }
-  settings.username = username
+
   await saveSettings()
 
   // Run sync first (if configured)
@@ -273,7 +311,9 @@ document.getElementById('launch').addEventListener('click', async () => {
 
   const extraJvm = extraJvmEl ? (extraJvmEl.value || '') : ''
   const extraArgsArr = extraJvm ? extraJvm.split(' ').filter(Boolean) : []
-  const res = await window.electronAPI.launchVersion({ mcPath, forgePath : forgeInstallerPath, versionId: (cachedRemote && cachedRemote.install && cachedRemote.install.minecraft), javaPath, username, ram, extraJvmArgs: extraArgsArr })
+  // send memoryMB explicitly (use settings.ram or numeric input; default to 4096 MB)
+  const ramValue = settings && settings.ram ? Number(settings.ram) : (parseInt(document.getElementById('ram')?.value || '4096', 10) || 4096)
+  const res = await window.electronAPI.launchVersion({ mcPath, forgePath : forgeInstallerPath, versionId: (cachedRemote && cachedRemote.install && cachedRemote.install.minecraft), javaPath, memoryMB: ramValue, extraJvmArgs: extraArgsArr })
   appendLog('Résultat lancement: ' + JSON.stringify(res))
   if (res && res.pid) launchPidEl.textContent = String(res.pid)
   } catch (e) {

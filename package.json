@@ -3,14 +3,44 @@
   "version": "0.1.0",
   "description": "Minecraft launcher scaffold (Electron) - Forge 1.20.1 support (no assistance for cracked bypass)",
   "main": "main.js",
+  "author": "Infuseting",
+  "license": "MIT",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win --x64",
+    "package": "npm run dist"
   },
   "devDependencies": {
     "adm-zip": "^0.5.9",
-    "electron": "^26.2.0"
+    "electron": "^26.2.0",
+    "electron-builder": "^26.0.12"
   },
   "dependencies": {
-    "minecraft-launcher-core": "^3.18.2"
+    "minecraft-launcher-core": "^3.18.2",
+    "msmc": "^5.0.5"
+  },
+  "build": {
+    "appId": "fr.Infuseting.StalkerRPLauncher",
+    "productName": "StalkerRPLauncher",
+    "files": [
+      "**/*"
+    ],
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "icon": "icon/icon",
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "icon/icon.ico"
+    },
+    "mac": {
+      "icon": "icon/icon.icns"
+    },
+    "linux": {
+      "icon": "icon/icon.png"
+    }
   }
 }

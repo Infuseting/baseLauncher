@@ -9,6 +9,7 @@ const { pipeline } = require('stream')
 const { promisify } = require('util')
 
 const { Client, Authenticator } = require('minecraft-launcher-core');
+const { Auth, tokenUtils, Minecraft } = require( "msmc");
 const streamPipeline = promisify(pipeline)
 const { spawn } = require('child_process')
 
@@ -19,6 +20,7 @@ let currentLaunchPid = null
 // If a remote install descriptor is loaded, prefer its name for default mc folder
 let remoteInstallName = null
 
+
 const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json')
 
 function loadSettings() {
@@ -27,7 +29,7 @@ function loadSettings() {
   } catch (e) {}
   const defaultFolderName = remoteInstallName ? ('.' + String(remoteInstallName)) : '.CustomLauncher'
   const defaultMc = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
-  const defaults = { minecraftPath: defaultMc, folderName: defaultFolderName, javaPath: null, ram: 4096, lastModified: {} }
+  const defaults = { minecraftPath: defaultMc, folderName: defaultFolderName, javaPath: null, ram: 4096, lastModified: {}, token: "" }
   fs.mkdirSync(path.join(defaults.minecraftPath, defaults.folderName), { recursive: true })
   return defaults
 }
@@ -36,58 +38,22 @@ function saveSettings(s) {
   try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8') } catch (e) {}
 }
 
-// Evaluate launcher "rules" entries (used in version json libraries and arguments).
-// Returns true when the object should be allowed for the current platform/arch.
-// Evaluate launcher "rules" entries (used in version json libraries and arguments).
-// Follows Minecraft launcher behavior: if no rules array -> allowed.
-// If rules present, default is disallow unless an allow rule matches; deny rules override.
-// Supports 'os' (name/arch) and 'features' matching.
-function evaluateRules(rules, features = {}) {
-  try {
-    if (!Array.isArray(rules) || rules.length === 0) return true
-    // If rules exist, default to false unless an allow rule matches
-    let result = false
-    for (const r of rules) {
-      const action = (r.action || 'allow')
-      let match = true
-      // OS matching
-      if (r.os) {
-        if (r.os.name) {
-          const n = String(r.os.name).toLowerCase()
-          if (!((n === 'windows' && process.platform === 'win32') || (n === 'osx' && process.platform === 'darwin') || (n === 'linux' && process.platform === 'linux'))) match = false
-        }
-        if (r.os.arch) {
-          try {
-            const arch = String(r.os.arch).toLowerCase()
-            const nodeArch = String(process.arch || '').toLowerCase()
-            if (!nodeArch.includes(arch)) match = false
-          } catch (e) { match = false }
-        }
-      }
-      // features matching: every feature key in rule.features must equal provided features
-      if (match && r.features) {
-        try {
-          for (const [k, v] of Object.entries(r.features || {})) {
-            const provided = features.hasOwnProperty(k) ? features[k] : undefined
-            // strict equality check; if provided undefined or mismatched -> no match
-            if (provided === undefined || String(provided) !== String(v)) { match = false; break }
-          }
-        } catch (e) { match = false }
-      }
-      if (match) {
-        // allow/deny behavior: allow sets true, disallow sets false
-        if (action === 'allow') result = true
-        else if (action === 'disallow' || action === 'deny') result = false
-      }
-    }
-    return result
-  } catch (e) { return true }
+// Secure token management
+function getAuthToken() {
+  const settings = loadSettings()
+  return settings.token || ""
 }
 
+function setAuthToken(token) {
+  const settings = loadSettings()
+  settings.token = token
+  saveSettings(settings)
+}
 function createWindow () {
   const win = new BrowserWindow({
     width: 900,
     height: 700,
+    icon: path.join(__dirname, 'icon', 'icon.png'), 
     webPreferences: {
       preload: path.join(__dirname, 'preload.js')
     }
@@ -113,6 +79,15 @@ ipcMain.handle('dialog:openDirectory', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory'] })
   if (res.canceled) return null
   return res.filePaths[0]
+})
+
+// Expose total system memory (in MB) for the renderer to bound RAM selection
+ipcMain.handle('system:getMemory', async () => {
+  try {
+    const totalBytes = os.totalmem()
+    const totalMB = Math.floor(totalBytes / (1024 * 1024))
+    return { success: true, totalMB }
+  } catch (e) { return { success: false, error: e && e.message } }
 })
 
 ipcMain.handle('dialog:openFile', async (_, filters) => {
@@ -195,33 +170,74 @@ ipcMain.handle('launch:java', async (_, { javaPath, args }) => {
 })
 
 // Launch a specific Minecraft version (builds classpath, extracts natives, spawns java)
-ipcMain.handle('launcher:runVersion', async (_, { mcPath, forgePath, username, javaPath, versionId }) => {
-  const launcher = new Client();
-  console.log(mcPath);
-  let opts = {
-    authorization: Authenticator.getAuth(username || 'Player' + Math.floor(Math.random() * 10000)),
-    root: mcPath,
-    version: {
-        number: versionId,
-        //number: "1.12.2",
-        type: "release"
-    },
-    forge: forgePath,
-    javaPath: javaPath,
-    memory: {
-        max: "6G",
-        min: "4G"
+
+ipcMain.handle('launcher:runVersion', async (event, { mcPath, forgePath, javaPath, versionId, memoryMB }) => {
+  const authManager = new Auth("select_account");
+  let token = getAuthToken();
+  console.log(token)
+  // Vérifie la validité du token
+  let valid = false;
+  if (token) {
+    try {
+      console.log("test");
+      let mc = tokenUtils.fromMclcToken(authManager,token);
+      console.log(mc);
+      mc = await mc.refresh(); 
+      console.log(mc)
+      valid = mc instanceof (Minecraft)
+    } catch (e) { console.log(e); valid = false; }
+  }
+
+  if (!valid) {
+    // Demande le relog à l'utilisateur (popup Electron)
+    // MSMC: lance le flow d'authentification
+    try {
+      const result = await authManager.launch("raw");
+      if (result && await result.getMinecraft()) {
+        let mc = await result.getMinecraft();
+        let token = mc.mclc(true);
+        setAuthToken(token);
+        event.sender.send('sync:log', { level: 'info', text: 'Authentification reussis'});
+      } else {
+        event.sender.send('sync:log', { level: 'error', text: 'Authentification échouée.' });
+        return { success: false, error: 'auth-failed' };
+      }
+    } catch (e) {
+      event.sender.send('sync:log', { level: 'error', text: 'Erreur auth: ' + (e && e.message ? e.message : String(e)) });
+      return { success: false, error: 'auth-exception' };
     }
-};
+  }
 
-  launcher.launch(opts);
-
-  launcher.on('debug', (e) => console.log("[DEBUG]", e));
-  launcher.on('error', (e) => console.log("[ERROR]", e));
-  launcher.on('info', (e) => console.log("[INFO]", e));
-  launcher.on('warn', (e) => console.log("[WARN]", e));
-  launcher.on('data', (e) => console.log("[DATA]", e));
+  // Lance Minecraft avec le token valide
+  launchMc(event, mcPath, forgePath, javaPath, versionId, memoryMB, token);
+  return { success: true };
 })
+
+function launchMc( _, mcPath, forgePath, javaPath, versionId, memoryMB, token) {    
+    const launcher = new Client();
+    let opts = {
+      authorization: token, 
+      root: mcPath,
+      version: {
+          number: versionId,
+          //number: "1.12.2",
+          type: "release"
+      },
+      forge: forgePath,
+      javaPath: javaPath,
+    memory: {
+      max: (memoryMB && Number.isFinite(Number(memoryMB))) ? String(Math.max(512, Math.floor(Number(memoryMB))) + 'M') : '4G',
+      min: "1G"
+    }
+  }
+    launcher.launch(opts);
+
+    launcher.on('debug', (e) =>  { try { _.sender.send('sync:log', { level: 'debug', text: String(e) }) } catch(f){} });
+    launcher.on('error', (e) =>  { try { _.sender.send('sync:log', { level: 'error', text: String(e) }) } catch(f){} });
+    launcher.on('info', (e) => { try { _.sender.send('sync:log', { level: 'info', text: String(e) }) } catch(f){} });
+    launcher.on('warn', (e) =>  { try { _.sender.send('sync:log', { level: 'warn', text: String(e) }) } catch(f){} });
+    launcher.on('data', (e) =>  { try { _.sender.send('sync:log', { level: 'data', text: String(e) }) } catch(f){} });
+}
 // Kill the currently launched process (best-effort)
 ipcMain.handle('launcher:kill', async () => {
   try {
@@ -326,9 +342,28 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
 
     // Separate directories and regular files. We'll create directories first
     // normalize allowedDirs if provided
-    let allowedSet = null
+    // allowedDirs can be an array of relative paths (files or folders). We'll build
+    // exact-file set and directory-prefix set for matching.
+    let allowedExact = new Set()
+    let allowedPrefixes = []
+    let allowedProvided = false
     if (Array.isArray(allowedDirs) && allowedDirs.length) {
-      allowedSet = new Set(allowedDirs.map(d => String(d).trim().toLowerCase()))
+      allowedProvided = true
+      for (const d of allowedDirs) {
+        if (!d) continue
+        let norm = String(d).trim().replace(/\\/g, '/').replace(/^\//, '').replace(/\s+/g, '')
+        if (!norm) continue
+        // directory entry: ensure trailing slash
+        if (norm.endsWith('/')) {
+          const p = norm.replace(/\\/g, '/').toLowerCase()
+          allowedPrefixes.push(p)
+        } else {
+          // could be file or directory without trailing slash; treat as both exact and prefix
+          const low = norm.toLowerCase()
+          allowedExact.add(low)
+          allowedPrefixes.push(low + '/')
+        }
+      }
     }
 
   const dirsAll = files.filter(f => f.name && f.name.endsWith('/'))
@@ -363,8 +398,24 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
     if (t) inferredTop.add(t.toLowerCase())
   }
 
+  const isPathAllowed = (normPath) => {
+    // normPath should be lowercased, no leading slash
+    if (!normPath) return false
+    const p = normPath.toLowerCase()
+    if (allowedExact.has(p)) return true
+    for (const pref of allowedPrefixes) if (p.startsWith(pref)) return true
+    return false
+  }
+
   const isTopAllowed = (top) => {
-    if (allowedSet && allowedSet.size) return allowedSet.has(top)
+    if (allowedProvided) {
+      // consider top allowed if any allowed prefix/exact lies under this top
+      if (!top) return false
+      const t = top.toLowerCase()
+      for (const pref of allowedPrefixes) if (pref.startsWith(t + '/')) return true
+      for (const ex of Array.from(allowedExact)) if (ex.split('/')[0] === t) return true
+      return false
+    }
     return inferredTop.has(top)
   }
 
@@ -386,9 +437,10 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
           if (md5 === entry.md5 && String(stat.size) === String(entry.size)) {
             needDownload = false
           } else {
-            // If the file exists but differs, only overwrite if its top-level is part of the mirrored set
-            if (!isTopAllowed(top)) {
-              // preserve local modified file outside syncDir: do not overwrite
+            // If the file exists but differs, only overwrite if the file path is within an allowed path
+            // (allowedDirs). Otherwise preserve local modifications.
+            if (!isPathAllowed(normNameKey)) {
+              // preserve local modified file outside allowedDirs: do not overwrite
               event.sender.send('sync:progress', { name, status: 'ok', reason: 'preserve-local', index: idx + 1, totalFiles })
               // mark as verified so cleanup won't remove it
               try { verified.add(normNameKey) } catch (e) {}
@@ -484,10 +536,18 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
           }
         }
 
-      // determine top-level folders referenced by the server list or use allowedSet if provided
+      // determine top-level folders referenced by the server list or use allowedProvided to restrict
       const topDirs = new Set()
-      if (allowedSet) {
-        for (const a of Array.from(allowedSet)) topDirs.add(a.toLowerCase())
+      if (allowedProvided) {
+        // use the first segment of allowed prefixes/exacts
+        for (const pref of allowedPrefixes) {
+          const seg = pref.replace(/\/$/, '').split('/')[0]
+          if (seg) topDirs.add(seg.toLowerCase())
+        }
+        for (const ex of Array.from(allowedExact)) {
+          const seg = ex.split('/')[0]
+          if (seg) topDirs.add(seg.toLowerCase())
+        }
       } else {
         for (const p of expectedFiles) {
           const parts = p.split('/')
@@ -522,7 +582,7 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
         }
 
         // Enable dry-run during debugging to avoid destructive deletions
-        const DRY_RUN = true
+        const DRY_RUN = false
 
         for (const td of Array.from(topDirs)) {
           const localTop = path.join(mcPath, td)
@@ -532,12 +592,25 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
               // normalize relative key
               const key = rel.replace(/^\/?/, '').replace(/\\/g, '/').toLowerCase()
               const isDir = key.endsWith('/')
-              // safety: only consider deletions for items whose top-level folder is in topDirs
-              const top = key.replace(/^\//, '').split('/')[0]
-              if (!topDirs.has(top)) {
-                // skip items outside the syncDir
-                continue
-              }
+                // safety: only consider deletions for items whose top-level folder is in topDirs
+                const top = key.replace(/^\//, '').split('/')[0]
+                if (!topDirs.has(top)) {
+                  // skip items outside the syncDir
+                  continue
+                }
+                // Only consider deletion if the local entry falls under an allowed prefix or exact path
+                let considerDeletion = false
+                if (allowedProvided) {
+                  // if this relative path matches any allowed prefix/exact -> allowed for mirroring and deletion
+                  if (allowedExact.has(key) ) considerDeletion = true
+                  else {
+                    for (const pref of allowedPrefixes) { if (key.startsWith(pref)) { considerDeletion = true; break } }
+                  }
+                } else {
+                  // no allowedDirs provided -> mirror everything under topDirs
+                  considerDeletion = true
+                }
+                if (!considerDeletion) continue
               // emit diagnostic check info
               try { event.sender.send('sync:progress', { name: key, status: 'check', details: { isDir, inExpectedFile: expectedFiles.has(key), inExpectedDir: expectedDirs.has(key), inVerified: verified.has(key.replace(/\/$/, '')), top, topAllowed: topDirs.has(top) } }) } catch (e) {}
             // decide deletion: if file -> delete only if not in expectedFiles
@@ -556,7 +629,8 @@ ipcMain.handle('sync:start', async (event, { listUrl, baseUrl, mcPath, allowedDi
                     if (st.isDirectory()) {
                       await fs.promises.rm(abs, { recursive: true, force: true })
                     } else {
-                      await fs.promises.unlink(abs)
+                      
+                      await fs.promises.rm(abs, { force: true })
                     }
                     summary.removed++
                     try { event.sender.send('sync:progress', { name: key, status: 'deleted', reason: 'extraneous' }) } catch (e) {}

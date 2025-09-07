@@ -11,26 +11,16 @@
       <h1>StalkerRP Launcher — Forge 1.20.1</h1>
 
       <div class="row">
-        <label for="username">Pseudo (mode crack):</label>
-        <input id="username" placeholder="Pseudo (3-16, lettres/chiffres/_)" pattern="[A-Za-z0-9_]{3,16}" minlength="3" maxlength="16" title="3-16 caractères, lettres, chiffres et underscore seulement" autocomplete="off" />
-        <div id="usernameError" class="input-error" aria-live="polite" style="color:#e06c75;margin-top:4px;font-size:0.9em;display:none"></div>
+        <label for="ram">RAM allouée (MB):</label>
+        <input id="ram" type="number" min="512" step="256" style="width:120px" />
+        <span id="ramNote" style="margin-left:8px;color:#999">Chargement...</span>
       </div>
+      
       <div class="row">
         <button id="launch">Lancer le jeu (télécharger puis exécuter)</button>
       </div>
 
-      <div class="row expert-panel">
-        <label for="expertToggle"><input type="checkbox" id="expertToggle" /> Mode Expert</label>
-      </div>
-      <div id="expertOptions" class="row" style="display:none;">
-        <label for="extraJvm">Options JVM avancées (une option par espace):</label>
-        <textarea id="extraJvm" placeholder="--add-opens java.base/java.lang=ALL-UNNAMED --add-modules ALL-MODULE-PATH" rows="3" style="width:100%"></textarea>
-        <div style="margin-top:8px">
-          <button id="copyArgs">Copier args</button>
-          <span style="margin-left:12px">PID: <span id="launchPid">-</span></span>
-          <button id="killBtn" style="margin-left:12px">Kill</button>
-        </div>
-      </div>
+    
 
       <div class="progress-area">
         <div class="progress-block">
